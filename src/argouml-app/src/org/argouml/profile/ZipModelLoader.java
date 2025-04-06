@@ -60,6 +60,10 @@ public class ZipModelLoader extends StreamModelLoader {
         Logger.getLogger(ZipModelLoader.class.getName());
 
 
+
+
+
+
     public Collection loadModel(ProfileReference reference)
         throws ProfileException {
         LOG.log(Level.INFO,
@@ -83,6 +87,7 @@ public class ZipModelLoader extends StreamModelLoader {
             System.setProperty("org.argouml.model.modules_search_path",
                     path);
         }
+
         try {
             is = openZipStreamAt(modelFile.toURI().toURL(), extension);
         } catch (MalformedURLException e) {
@@ -99,11 +104,7 @@ public class ZipModelLoader extends StreamModelLoader {
             throw new ProfileException(e);
         }
 
-        if (is == null) {
-            throw new ProfileException("Profile could not be loaded!");
-        }
-
-        return super.loadModel(is, reference.getPublicReference());
+@@ -107,27 +96,51 @@
     }
 
     /**
@@ -125,9 +126,12 @@ public class ZipModelLoader extends StreamModelLoader {
         ZipInputStream zis = new ZipInputStream(url.openStream());
         ZipEntry entry = zis.getNextEntry();
         while (entry != null && !entry.getName().endsWith(ext)) {
-            entry = zis.getNextEntry();
+            entry = zis.getNextEntry()
+
         }
         return zis;
     }
+
+
 
 }
