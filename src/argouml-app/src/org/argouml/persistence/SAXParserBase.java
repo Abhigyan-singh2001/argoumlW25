@@ -53,107 +53,63 @@ import javax.xml.parsers.SAXParserFactory;
 import org.xml.sax.Attributes;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
+import org.xml.sax.SAXNotRecognizedException;
+import org.xml.sax.SAXNotSupportedException;
 import org.xml.sax.helpers.DefaultHandler;
 
-/**
- * @author Jim Holt
- */
-
 abstract class SAXParserBase extends DefaultHandler {
-    /**
-     * Logger.
-     */
-    private static final Logger LOG =
-        Logger.getLogger(SAXParserBase.class.getName());
+    private static final Logger LOG = Logger.getLogger(SAXParserBase.class.getName());
 
-    /**
-     * The constructor.
-     */
     public SAXParserBase() {
         // empty constructor
     }
 
-    ////////////////////////////////////////////////////////////////
-    // static variables
-
-    /**
-     * Switching this to true gives some extra logging messages.
-     */
     protected static final boolean DBG = false;
+    private static XMLElement[] elements = new XMLElement[100];
+    private static int nElements = 0;
+    private static XMLElement[] freeElements = new XMLElement[100];
+    private static int nFreeElements = 0;
+    private static boolean stats = true;
+    private static long parseTime = 0;
 
-    /**
-     * This acts as a stack of elements.<p>
-     *
-     * {@link #startElement(String, String, String, Attributes)} places
-     * an item on the stack end {@link #endElement(String, String, String)}
-     * removes it.
-     */
-    private   static  XMLElement[]  elements      = new XMLElement[100];
+    public void setStats(boolean s) {
+        stats = s;
+    }
 
-    /**
-     * The number of items actually in use on the elements stack.
-     */
-    private   static  int           nElements     = 0;
+    public boolean getStats() {
+        return stats;
+    }
 
-    /**
-     * This acts as a stack of elements.<p>
-     *
-     * {@link #startElement(String, String, String, Attributes)} places
-     * an item on the stack end {@link #endElement(String, String, String)}
-     * removes it.
-     */
-    private   static  XMLElement[]  freeElements  = new XMLElement[100];
-    private   static  int           nFreeElements = 0;
-
-    private   static  boolean       stats         = true;
-    private   static  long          parseTime     = 0;
-
-    ////////////////////////////////////////////////////////////////
-    // accessors
-
-    /**
-     * @param s true if statistics have to be shown
-     */
-    public void    setStats(boolean s) { stats = s; }
-
-    /**
-     * @return  true if statistics have to be shown
-     */
-    public boolean getStats()              { return stats; }
-
-    /**
-     * @return the parsing time
-     */
     public long getParseTime() {
         return parseTime;
     }
 
-
-    /**
-     * @param reader the reader to read
-     * @throws SAXException when parsing xml
-     */
     public void parse(Reader reader) throws SAXException {
         parse(new InputSource(reader));
     }
 
-    /**
-     * @param input the InputSource to read
-     * @throws SAXException when parsing xml
-     */
     public void parse(InputSource input) throws SAXException {
-
         long start, end;
 
         SAXParserFactory factory = SAXParserFactory.newInstance();
+
+        // Secure configuration against XXE
+        try {
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        } catch (ParserConfigurationException | SAXNotRecognizedException |
+                 SAXNotSupportedException e) {
+            throw new SAXException("Failed to configure XML parser securely against XXE", e);
+        }
+
         factory.setNamespaceAware(false);
         factory.setValidating(false);
 
         try {
             SAXParser parser = factory.newSAXParser();
 
-            // If we weren't given a system ID, attempt to use the URL for the
-            // JAR that we were loaded from.  (Why? - tfm)
             if (input.getSystemId() == null) {
                 input.setSystemId(getJarResource("org.argouml.kernel.Project"));
             }
@@ -162,59 +118,31 @@ abstract class SAXParserBase extends DefaultHandler {
             parser.parse(input, this);
             end = System.currentTimeMillis();
             parseTime = end - start;
-        } catch (IOException e) {
-            throw new SAXException(e);
-        } catch (ParserConfigurationException e) {
+        } catch (IOException | ParserConfigurationException e) {
             throw new SAXException(e);
         }
+
         if (stats) {
             LOG.log(Level.INFO, "Elapsed time: {0} ms", (end - start));
         }
     }
 
-    ////////////////////////////////////////////////////////////////
-    // abstract methods
+    protected abstract void handleStartElement(XMLElement e) throws SAXException;
 
-    /**
-     * Implement in the concrete class to handle reaching the start tag of
-     * an element of interest.
-     * @param e the element.
-     * @throws SAXException on any error parsing the element.
-     */
-    protected abstract void handleStartElement(XMLElement e)
-        throws SAXException;
-    /**
-     * Implement in the concrete class to handle reaching the end tag of
-     * an element of interest.
-     * @param e the element.
-     * @throws SAXException on any error parsing the element.
-     */
-    protected abstract void handleEndElement(XMLElement e)
-        throws SAXException;
+    protected abstract void handleEndElement(XMLElement e) throws SAXException;
 
-    ////////////////////////////////////////////////////////////////
-    // non-abstract methods
-
-    /*
-     * @see org.xml.sax.ContentHandler#startElement(java.lang.String,
-     *         java.lang.String, java.lang.String, org.xml.sax.Attributes)
-     */
-    public void startElement(String uri,
-            String localname,
-            String name,
-            Attributes atts) throws SAXException {
+    public void startElement(String uri, String localname, String name, Attributes atts) throws SAXException {
         if (isElementOfInterest(name)) {
-
             XMLElement element = createXmlElement(name, atts);
 
             if (LOG.isLoggable(Level.FINE)) {
                 StringBuffer buf = new StringBuffer();
                 buf.append("START: ").append(name).append(' ').append(element);
                 for (int i = 0; i < atts.getLength(); i++) {
-            	    buf.append("   ATT: ")
-                        .append(atts.getLocalName(i))
-                            .append(' ')
-                                .append(atts.getValue(i));
+                    buf.append("   ATT: ")
+                       .append(atts.getLocalName(i))
+                       .append(' ')
+                       .append(atts.getValue(i));
                 }
                 LOG.log(Level.FINE, "{0}", buf);
             }
@@ -224,13 +152,6 @@ abstract class SAXParserBase extends DefaultHandler {
         }
     }
 
-    /**
-     * Factory method to return an XMLElement.
-     * This will reuse previously created elements when possible.
-     * @param name The element name.
-     * @param atts The element attributes.
-     * @return the element.
-     */
     private XMLElement createXmlElement(String name, Attributes atts) {
         if (nFreeElements == 0) {
             return new XMLElement(name, atts);
@@ -242,21 +163,14 @@ abstract class SAXParserBase extends DefaultHandler {
         return e;
     }
 
-    /*
-     * @see org.xml.sax.ContentHandler#endElement(java.lang.String,
-     *         java.lang.String, java.lang.String)
-     */
-    public void endElement(String uri, String localname, String name)
-        throws SAXException {
+    public void endElement(String uri, String localname, String name) throws SAXException {
         if (isElementOfInterest(name)) {
             XMLElement e = elements[--nElements];
             if (LOG.isLoggable(Level.FINE)) {
                 StringBuffer buf = new StringBuffer();
-                buf.append("END: " + e.getName() + " ["
-            	       + e.getText() + "] " + e + "\n");
+                buf.append("END: " + e.getName() + " [" + e.getText() + "] " + e + "\n");
                 for (int i = 0; i < e.getNumAttributes(); i++) {
-                    buf.append("   ATT: " + e.getAttributeName(i) + " "
-                    	   + e.getAttributeValue(i) + "\n");
+                    buf.append("   ATT: " + e.getAttributeName(i) + " " + e.getAttributeValue(i) + "\n");
                 }
                 LOG.log(Level.FINE, "{0}", buf);
             }
@@ -264,58 +178,21 @@ abstract class SAXParserBase extends DefaultHandler {
         }
     }
 
-    /**
-     * Determine if an element of the given name is of interest to
-     * the parser. The base implementation assumes always true.
-     *
-     * @param name the element name.
-     * @return true if the element name is of interest.
-     */
     protected boolean isElementOfInterest(String name) {
         return true;
     }
 
-    // TODO: remove when code below in characters() is removed
-//    private static final String    RETURNSTRING  = "\n      ";
-
-    /*
-     * @see org.xml.sax.ContentHandler#characters(char[], int, int)
-     */
-    public void characters(char[] ch, int start, int length)
-        throws SAXException {
-
+    public void characters(char[] ch, int start, int length) throws SAXException {
         elements[nElements - 1].addText(ch, start, length);
-
-        // TODO: Remove this old implementation after 0.22 if it's
-        // demonstrated that it's not needed. - tfm
-
-        // Why does the text get added to ALL the elements on the stack? - tfm
-//        for (int i = 0; i < nElements; i++) {
-//            XMLElement e = elements[i];
-//            if (e.length() > 0) {
-//                // This seems wrong since this method can be called
-//                // multiple times at the parser's discretion - tfm
-//                e.addText(RETURNSTRING);
-//            }
-//            e.addText(ch, start, length);
-//        }
     }
 
-
-    /*
-     * @see org.xml.sax.EntityResolver#resolveEntity(java.lang.String,
-     *         java.lang.String)
-     */
-    public InputSource resolveEntity (String publicId, String systemId)
-        throws SAXException {
+    public InputSource resolveEntity(String publicId, String systemId) throws SAXException {
         try {
-	    URL testIt = new URL(systemId);
+            URL testIt = new URL(systemId);
             InputSource s = new InputSource(testIt.openStream());
             return s;
         } catch (Exception e) {
-            LOG.log(Level.INFO,
-                    "NOTE: Could not open DTD " + systemId
-                    + " due to exception");
+            LOG.log(Level.INFO, "NOTE: Could not open DTD " + systemId + " due to exception");
 
             String dtdName = systemId.substring(systemId.lastIndexOf('/') + 1);
             String dtdPath = "/org/argouml/persistence/" + dtdName;
@@ -331,12 +208,7 @@ abstract class SAXParserBase extends DefaultHandler {
         }
     }
 
-    /**
-     * @param cls the class
-     * @return the jar
-     */
     public String getJarResource(String cls) {
-  	//e.g:org.argouml.uml.generator.ui.ClassGenerationDialog -> poseidon.jar
         String jarFile = "";
         String fileSep = System.getProperty("file.separator");
         String classFile = cls.replace('.', fileSep.charAt(0)) + ".class";
@@ -350,23 +222,13 @@ abstract class SAXParserBase extends DefaultHandler {
                 jarFile = urlString.substring(idBegin + 5, idEnd);
             }
         }
-
         return jarFile;
     }
 
-    ////////////////////////////////////////////////////////////////
-    // convenience methods
-
-    /**
-     * @param e the element
-     */
     public void ignoreElement(XMLElement e) {
         LOG.log(Level.FINE, "NOTE: ignoring tag: {0}", e.getName());
     }
 
-    /**
-     * @param e the element
-     */
     public void notImplemented(XMLElement e) {
         LOG.log(Level.FINE, "NOTE: element not implemented: {0}", e.getName());
     }

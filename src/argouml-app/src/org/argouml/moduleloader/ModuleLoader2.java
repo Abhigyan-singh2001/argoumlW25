@@ -642,9 +642,10 @@ public final class ModuleLoader2 {
             Enumeration<JarEntry> jarEntries = jarfile.entries();
             while (jarEntries.hasMoreElements()) {
                 JarEntry entry = jarEntries.nextElement();
-                loadedClass =
-                        loadedClass
-                                | processEntry(classloader, entry.getName());
+                String entryName = entry.getName();
+                if (!entryName.contains("..") && !entryName.startsWith("/") && !entryName.startsWith("\\")) {
+                    loadedClass = loadedClass | processEntry(classloader, entryName);
+                }
             }
         } else {
             Map<String, Attributes> entries = manifest.getEntries();
