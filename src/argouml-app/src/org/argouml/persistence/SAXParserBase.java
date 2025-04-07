@@ -93,7 +93,11 @@ abstract class SAXParserBase extends DefaultHandler {
 
         SAXParserFactory factory = SAXParserFactory.newInstance();
 
+
+        
         // Secure configuration against XXE
+
+        
         try {
             factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
             factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
