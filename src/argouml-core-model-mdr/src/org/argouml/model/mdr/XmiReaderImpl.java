@@ -63,6 +63,7 @@ import javax.jmi.reflect.InvalidObjectException;
 import javax.jmi.reflect.RefObject;
 import javax.jmi.reflect.RefPackage;
 import javax.jmi.xmi.MalformedXMIException;
+import javax.xml.XMLConstants;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.parsers.SAXParser;
 import javax.xml.parsers.SAXParserFactory;
@@ -91,6 +92,7 @@ import org.xml.sax.SAXException;
 import org.xml.sax.SAXParseException;
 import org.xml.sax.XMLFilter;
 import org.xml.sax.XMLReader;
+import org.xml.sax.helpers.XMLReaderFactory;
 
 /**
  * A wrapper around the genuine XmiReader that provides public access with no
@@ -549,12 +551,17 @@ class XmiReaderImpl implements XmiReader, UnknownElementsListener,
 
     }
 
-    private InputSource serialTransform(String[] styles, InputSource input)
-        throws UmlException {
+    // Modify the serialTransform method to secure the XML processing:
+
+    private InputSource serialTransform(String[] styles, InputSource input) throws UmlException {
         SAXSource myInput = new SAXSource(input);
-        SAXTransformerFactory stf =
-            (SAXTransformerFactory) TransformerFactory.newInstance();
+        SAXTransformerFactory stf = (SAXTransformerFactory) TransformerFactory.newInstance();
+
         try {
+            // Secure the TransformerFactory first
+            stf.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            stf.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            stf.setAttribute(XMLConstants.ACCESS_EXTERNAL_STYLESHEET, "");
 
             for (int i = 0; i < styles.length; i++) {
                 // Set up source for style sheet
@@ -564,31 +571,35 @@ class XmiReaderImpl implements XmiReader, UnknownElementsListener,
 
                 URL xsltUrl = getClass().getResource(xsltFileName);
                 if (xsltUrl == null) {
-                    throw new UmlException("Error opening XSLT style sheet : "
-                            + xsltFileName);
+                    throw new UmlException("Error opening XSLT style sheet : " + xsltFileName);
                 }
-                StreamSource xsltStreamSource =
-                    new StreamSource(xsltUrl.openStream());
+                StreamSource xsltStreamSource = new StreamSource(xsltUrl.openStream());
                 xsltStreamSource.setSystemId(xsltUrl.toExternalForm());
 
                 // Create & set up temporary output file
                 File tmpOutFile = File.createTempFile(TEMP_XMI_FILE_PREFIX, ".xmi");
                 tmpOutFile.deleteOnExit();
-                StreamResult result =
-                    new StreamResult(new FileOutputStream(
-                        tmpOutFile));
+                StreamResult result = new StreamResult(new FileOutputStream(tmpOutFile));
 
-                // Create transformer and do transformation
+                // Create transformer with security settings
                 Transformer transformer = stf.newTransformer(xsltStreamSource);
+                transformer.setOutputProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+                transformer.setOutputProperty(XMLConstants.ACCESS_EXTERNAL_STYLESHEET, "");
+
+                // Secure the XMLReader
+                XMLReader reader = XMLReaderFactory.createXMLReader();
+                reader.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+                reader.setFeature("http://xml.org/sax/features/external-general-entities", false);
+                reader.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+                myInput.setXMLReader(reader);
+
                 transformer.transform(myInput, result);
 
                 LOG.log(Level.INFO, "Wrote converted XMI file - {0} converted using : {1}",
                         new Object[]{tmpOutFile, xsltFileName});
 
-                // Set up for next iteration
-                myInput =
-                    new SAXSource(new InputSource(new FileInputStream(
-                        tmpOutFile)));
+                // Set up for next iteration with secured reader
+                myInput = new SAXSource(new InputSource(new FileInputStream(tmpOutFile)));
                 myInput.setSystemId(tmpOutFile.toURI().toURL().toExternalForm());
             }
             return myInput.getInputSource();
@@ -598,8 +609,9 @@ class XmiReaderImpl implements XmiReader, UnknownElementsListener,
             throw new UmlException(e);
         } catch (TransformerException e) {
             throw new UmlException(e);
+        } catch (SAXException e) {
+            throw new UmlException(e);
         }
-
     }
 
     private File copySource(InputSource input) throws IOException {
